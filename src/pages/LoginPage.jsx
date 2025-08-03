@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import Card from '../components/Card';
 import { AlertCircle } from 'lucide-react';
+import { loginUser } from '../utils/auth';
+import { CONFIG, ERROR_MESSAGES } from '../utils/constants';
 
 const LoginPage = ({ onLogin }) => {
     const [formData, setFormData] = useState({ username: '', password: '' });
@@ -12,29 +14,22 @@ const LoginPage = ({ onLogin }) => {
         setError('');
         
         if (!formData.username || !formData.password) {
-            setError('Username dan password harus diisi');
+            setError(ERROR_MESSAGES.REQUIRED_FIELDS);
             return;
         }
 
         setIsLoading(true);
         
         try {
-            // Simulasi delay login
-            await new Promise(resolve => setTimeout(resolve, 500));
-
-            if (formData.username === 'admin' && formData.password === 'admin123') {
-                const userData = { 
-                    username: formData.username, 
-                    role: 'admin',
-                    isLoggedIn: true
-                };
-                localStorage.setItem('user', JSON.stringify(userData));
+            const result = await loginUser(formData.username, formData.password);
+            
+            if (result.success) {
                 onLogin();
             } else {
-                setError('Username atau password salah');
+                setError(result.error);
             }
         } catch (err) {
-            setError('Terjadi kesalahan saat login');
+            setError(ERROR_MESSAGES.UNKNOWN_ERROR);
         } finally {
             setIsLoading(false);
         }
@@ -43,7 +38,7 @@ const LoginPage = ({ onLogin }) => {
     return (
         <div className="min-h-screen flex flex-col justify-center items-center p-4 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-neutral-800 to-neutral-900">
             <div className="w-full max-w-sm">
-                <h1 className="text-5xl font-bold text-center mb-2 bg-gradient-to-r from-blue-500 to-blue-600 bg-clip-text text-transparent">POS Pro</h1>
+                <h1 className="text-5xl font-bold text-center mb-2 bg-gradient-to-r from-blue-500 to-blue-600 bg-clip-text text-transparent">{CONFIG.APP_NAME}</h1>
                 <p className="text-neutral-400 text-center mb-10">Selamat datang kembali, silakan login.</p>
                 <Card className="p-8">
                     <form onSubmit={handleSubmit}>

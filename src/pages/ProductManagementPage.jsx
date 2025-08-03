@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import Card from '../components/Card';
 import PageHeader from '../components/PageHeader';
 import { PlusCircle, Edit, Trash2 } from 'lucide-react';
-import { formatCurrency } from '../data/productData';
+import { formatCurrency } from '../utils/formatCurrency';
 import ConfirmDeleteModal from '../components/ConfirmDeleteModal';
 
 const ProductManagementPage = ({ products, onEditClick, onDeleteProduct }) => {
@@ -36,7 +36,14 @@ const ProductManagementPage = ({ products, onEditClick, onDeleteProduct }) => {
                             {products.map((product) => (
                                 <tr key={product.id} className="border-b border-neutral-800 hover:bg-neutral-800/60">
                                     <td className="p-4 flex items-center gap-4">
-                                        <img src={product.image} alt={product.name} className="w-12 h-12 rounded-md object-cover"/>
+                                        <img 
+                                            src={product.image} 
+                                            alt={product.name} 
+                                            className="w-12 h-12 rounded-md object-cover"
+                                            onError={(e) => {
+                                                e.target.src = 'https://images.unsplash.com/photo-1509042239860-f550ce710b93?w=300';
+                                            }}
+                                        />
                                         <span className="font-semibold text-white">{product.name}</span>
                                     </td>
                                     <td className="p-4 text-neutral-400">{product.category}</td>

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import Modal from './Modal';
-import { formatCurrency } from '../data/mockData';
+import { formatCurrency } from '../utils/formatCurrency';
 
 const PaymentModal = ({ show, onClose, onConfirm, total }) => {
   const [amountPaid, setAmountPaid] = useState('');

@@ -6,41 +6,90 @@ import ProductFormPage from './pages/ProductFormPage';
 import CashierPage from './pages/CashierPage';
 import ReportsPage from './pages/ReportsPage';
 import Sidebar from './components/Sidebar';
+import ErrorBoundary from './components/ErrorBoundary';
 import SuccessModal from './components/SuccessModal';
 import ConfirmModal from './components/ConfirmModal';
 import PaymentModal from './components/PaymentModal';
 import PaymentSuccessModal from './components/PaymentSuccessModal';
-import { getProducts, saveProduct, deleteProduct } from './data/productData';
-import { addTransaction } from './data/transactionData';
+import { getCurrentUser, logoutUser, isAuthenticated } from './utils/auth';
+import { productStorage, transactionStorage, databaseInfo } from './utils/databaseAdapter';
+import { useSessionTimeout } from './hooks/useCustomHooks';
+import { CONFIG } from './utils/constants';
 
 export default function App() {
-  const [isLoggedIn, setIsLoggedIn] = useState(() => {
-    const user = localStorage.getItem('user');
-    return user ? JSON.parse(user).isLoggedIn : false;
-  });
   const [currentPage, setCurrentPage] = useState('dashboard');
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [currentUser, setCurrentUser] = useState(null);
   const [products, setProducts] = useState([]);
   const [cart, setCart] = useState([]);
+  const [isFormVisible, setIsFormVisible] = useState(false);
+  const [productToEdit, setProductToEdit] = useState(null);
+  const [productToDelete, setProductToDelete] = useState(null);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [lastPaymentDetails, setLastPaymentDetails] = useState(null);
-  const [productToEdit, setProductToEdit] = useState(null);
-  const [productToDelete, setProductToDelete] = useState(null);
-  const [isFormVisible, setIsFormVisible] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [databaseStatus, setDatabaseStatus] = useState('initializing');
 
-  // Load products on mount
+  // Session timeout handler
+  const handleSessionTimeout = () => {
+    logoutUser();
+    setIsLoggedIn(false);
+    setCurrentUser(null);
+    setCurrentPage('dashboard');
+    alert('Sesi Anda telah berakhir. Silakan login kembali.');
+  };
+
+  // Use session timeout hook
+  useSessionTimeout(handleSessionTimeout, CONFIG.SESSION_TIMEOUT);
+
+  // Initialize authentication and load data
   useEffect(() => {
-    setProducts(getProducts());
-  }, []);
+    const initializeApp = async () => {
+      try {
+        // Check authentication
+        if (isAuthenticated()) {
+          const user = getCurrentUser();
+          setCurrentUser(user);
+          setIsLoggedIn(true);
+        }
 
-  const navigateTo = (page) => {
+        // Load products from database
+        setIsLoading(true);
+        setDatabaseStatus('loading');
+        
+        const savedProducts = await productStorage.getAll();
+        setProducts(savedProducts || []);
+        
+        setDatabaseStatus('ready');
+      } catch (error) {
+        console.error('Error loading products:', error);
+        setProducts([]);
+        setDatabaseStatus('error');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    initializeApp();
+  }, []);  const navigateTo = (page) => {
     setCurrentPage(page);
     setIsFormVisible(false);
   };
 
   const handleLogin = () => {
+    const user = getCurrentUser();
     setIsLoggedIn(true);
+    setCurrentUser(user);
     setCurrentPage('dashboard');
+  };
+
+  const handleLogout = () => {
+    logoutUser();
+    setIsLoggedIn(false);
+    setCurrentUser(null);
+    setCurrentPage('dashboard');
+    setCart([]);
   };
 
   const handleEditClick = (product) => {
@@ -48,18 +97,42 @@ export default function App() {
     setIsFormVisible(true);
   };
 
-  const handleSaveProduct = (productData) => {
-    const updatedProducts = saveProduct(productData);
-    setProducts(updatedProducts);
-    setIsFormVisible(false);
-    setShowSuccessModal(true);
+  const handleSaveProduct = async (productData) => {
+    try {
+      setIsLoading(true);
+      let updatedProduct;
+      
+      if (productToEdit) {
+        // Update existing product
+        updatedProduct = await productStorage.update(productToEdit.id, productData);
+        setProducts(products.map(p => p.id === productToEdit.id ? updatedProduct : p));
+      } else {
+        // Add new product
+        updatedProduct = await productStorage.add(productData);
+        setProducts(prev => [...prev, updatedProduct]);
+      }
+      
+      if (updatedProduct) {
+        setIsFormVisible(false);
+        setProductToEdit(null);
+        setShowSuccessModal(true);
+      }
+    } catch (error) {
+      console.error('Error saving product:', error);
+      alert(`Terjadi kesalahan saat menyimpan produk: ${error.message}`);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const handleDeleteProduct = (productId) => {
-    const updatedProducts = deleteProduct(productId);
-    setProducts(updatedProducts);
-    setProductToDelete(null);
-    setShowSuccessModal(true);
+  const handleDeleteProduct = async (productId) => {
+    try {
+      await productStorage.delete(productId);
+      setProducts(products.filter(p => p.id !== productId));
+      setProductToDelete(null); // Close the confirmation modal
+    } catch (error) {
+      console.error('Error deleting product:', error);
+    }
   };
 
   const handleCancelForm = () => {
@@ -94,35 +167,69 @@ export default function App() {
     );
   };
 
+  const removeItemFromCart = (productId) => {
+    setCart(prevCart => prevCart.filter(item => item.id !== productId));
+  };
+
+  const updateQuantity = (productId, newQuantity) => {
+    if (newQuantity <= 0) {
+      removeItemFromCart(productId);
+    } else {
+      setCart(prevCart =>
+        prevCart.map(item =>
+          item.id === productId
+            ? { ...item, quantity: newQuantity }
+            : item
+        )
+      );
+    }
+  };
+
   const clearCart = () => {
     setCart([]);
     setShowPaymentModal(false);
   };
 
-  const processPayment = (paymentDetails) => {
-    const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
-    const transaction = {
-      items: cart,
-      total: total,
-      amountPaid: paymentDetails.amountPaid,
-      change: paymentDetails.change,
-      date: new Date().toISOString()
-    };
-    
-    addTransaction(transaction);
-    setShowPaymentModal(false);
-    setLastPaymentDetails(paymentDetails);
-    setShowSuccessModal(true);
+  const processPayment = async (paymentDetails) => {
+    try {
+      setIsLoading(true);
+      const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
+      const transaction = {
+        items: cart,
+        total: total,
+        amountPaid: paymentDetails.amountPaid,
+        change: paymentDetails.change,
+        cashier: currentUser?.username || 'Unknown',
+        timestamp: new Date().toISOString(),
+      };
+      
+      const savedTransaction = await transactionStorage.add(transaction);
+      
+      setShowPaymentModal(false);
+      setLastPaymentDetails(paymentDetails);
+      setShowSuccessModal(true);
 
-    // Clear cart after successful payment
-    setTimeout(() => {
-      setShowSuccessModal(false);
+      // Clear cart immediately after successful payment
       clearCart();
-    }, 3000);
+
+      // Auto close success modal after 3 seconds
+      setTimeout(() => {
+        setShowSuccessModal(false);
+      }, 3000);
+    } catch (error) {
+      console.error('Error processing payment:', error);
+      alert(`Terjadi kesalahan saat memproses pembayaran: ${error.message}`);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   if (!isLoggedIn) {
-    return <LoginPage onLogin={handleLogin} />;
+    return (
+      <ErrorBoundary>
+        <LoginPage onLogin={handleLogin} />
+      </ErrorBoundary>
+    );
   }
 
   const renderPage = () => {
@@ -138,7 +245,7 @@ export default function App() {
 
     switch (currentPage) {
       case 'dashboard':
-        return <DashboardPage navigateTo={navigateTo} />;
+        return <DashboardPage navigateTo={navigateTo} products={products} />;
       case 'produk':
         return (
           <ProductManagementPage
@@ -154,6 +261,8 @@ export default function App() {
             cart={cart}
             addToCart={addToCart}
             removeFromCart={removeFromCart}
+            removeItemFromCart={removeItemFromCart}
+            updateQuantity={updateQuantity}
             clearCart={clearCart}
             onProcessPayment={() => setShowPaymentModal(true)}
           />
@@ -161,39 +270,46 @@ export default function App() {
       case 'laporan':
         return <ReportsPage />;
       default:
-        return <DashboardPage navigateTo={navigateTo} />;
+        return <DashboardPage navigateTo={navigateTo} products={products} />;
     }
   };
 
   return (
-    <div className="flex h-screen bg-neutral-900 text-white overflow-hidden">
-      <Sidebar currentPage={currentPage} navigateTo={navigateTo} />
-      <main className="flex-1 overflow-auto">
-        {renderPage()}
-      </main>
-      
-      <PaymentModal
-        show={showPaymentModal}
-        onClose={() => setShowPaymentModal(false)}
-        onConfirm={processPayment}
-        total={cart.reduce((sum, item) => sum + item.price * item.quantity, 0)}
-      />
+    <ErrorBoundary>
+      <div className="flex h-screen bg-neutral-900 text-white overflow-hidden">
+        <Sidebar 
+          currentPage={currentPage} 
+          navigateTo={navigateTo} 
+          currentUser={currentUser}
+          onLogout={handleLogout}
+        />
+        <main className="flex-1 overflow-auto">
+          {renderPage()}
+        </main>
+        
+        <PaymentModal
+          show={showPaymentModal}
+          onClose={() => setShowPaymentModal(false)}
+          onConfirm={processPayment}
+          total={cart.reduce((sum, item) => sum + item.price * item.quantity, 0)}
+        />
 
-      <PaymentSuccessModal
-        show={showSuccessModal && lastPaymentDetails}
-        onClose={() => {
-          setShowSuccessModal(false);
-          setLastPaymentDetails(null);
-        }}
-        change={lastPaymentDetails?.change || 0}
-      />
+        <PaymentSuccessModal
+          show={showSuccessModal && lastPaymentDetails}
+          onClose={() => {
+            setShowSuccessModal(false);
+            setLastPaymentDetails(null);
+          }}
+          change={lastPaymentDetails?.change || 0}
+        />
 
-      <ConfirmModal
-        show={!!productToDelete}
-        message="Apakah Anda yakin ingin menghapus produk ini?"
-        onConfirm={() => handleDeleteProduct(productToDelete)}
-        onCancel={() => setProductToDelete(null)}
-      />
-    </div>
+        <ConfirmModal
+          show={!!productToDelete}
+          message="Apakah Anda yakin ingin menghapus produk ini?"
+          onConfirm={() => handleDeleteProduct(productToDelete)}
+          onCancel={() => setProductToDelete(null)}
+        />
+      </div>
+    </ErrorBoundary>
   );
 }
